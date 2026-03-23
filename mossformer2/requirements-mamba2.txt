@@ -1,0 +1,12 @@
+numpy
+scipy
+soundfile
+librosa
+joblib
+yamlargparse
+einops
+torchinfo
+rotary-embedding-torch
+tensorboard
+pesq
+pystoi

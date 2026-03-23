@@ -1,96 +1,278 @@
-# ClearerVoice-Studio: Train Speech Separation Models
+# MossFormer2 Training Guide
 
-## 1. Introduction
+This folder contains the training and inference code for MossFormer2 speech separation in the current workspace. The codebase now supports two recurrent variants inside the separator:
 
-This repository provides a flexible training or finetune scripts for speech separation models. Currently, it supports both 8kHz and 16kHz sampling rates:
+- `fsmn`: original baseline branch
+- `mamba2`: new recurrent branch based on the local `mamba/` package
 
-|model name| sampling rate | Paper Link|
-|----------|---------------|------------|
-|MossFormer2_SS_8K  |8000| MossFormer2 ([Paper](https://arxiv.org/abs/2312.11825), ICASSP 2024)|
-|MossFormer2_SS_16K  |16000| MossFormer2 ([Paper](https://arxiv.org/abs/2312.11825), ICASSP 2024)|
+The default model families are:
 
-MossFormer2 has achieved state-of-the-art speech sesparation performance upon the paper published in ICASSP 2024. It is a hybrid model by integrating a recurrent module into
-our previous [MossFormer](https://arxiv.org/abs/2302.11824) framework. MossFormer2 is capable to model not only long-range and coarse-scale dependencies but also fine-scale recurrent patterns. For efficient self-attention across the extensive sequence, MossFormer2 adopts the joint local-global self-attention strategy as proposed for MossFormer. MossFormer2 introduces a dedicated recurrent module to model intricate temporal dependencies within speech signals.
+- `MossFormer2_SS_8K`
+- `MossFormer2_SS_16K`
 
-![github_fig1](https://github.com/alibabasglab/MossFormer2/assets/62317780/e69fb5df-4d7f-4572-88e6-8c393dd8e99d)
+## 1. What changed in this workspace
 
+Compared with the upstream training code, this workspace now includes:
 
-Instead of applying the recurrent neural networks (RNNs) that use traditional recurrent connections, we present a recurrent module based on a feedforward sequential memory network (FSMN), which is considered "RNN-free" recurrent network due to the ability to capture recurrent patterns without using recurrent connections. Our recurrent module mainly comprises an enhanced dilated FSMN block by using gated convolutional units (GCU) and dense connections. In addition, a bottleneck layer and an output layer are also added for controlling information flow. The recurrent module relies on linear projections and convolutions for seamless, parallel processing of the entire sequence. 
+- `mamba2` integration in the recurrent branch
+- preflight checks in `train.py` and `inference.py`
+- safer checkpoint resume behavior when switching architectures
+- updated `train.sh` supporting both single-GPU and multi-GPU runs
+- ready-to-edit Libri2Mix 8k configs for `mamba2`
 
-![github_fig2](https://github.com/alibabasglab/MossFormer2/assets/62317780/7273174d-01aa-4cc5-9a67-1fa2e8f7ac2e)
+## 2. Recommended environment
 
+Use:
 
-MossFormer2 demonstrates remarkable performance in WSJ0-2/3mix, Libri2Mix, and WHAM!/WHAMR! benchmarks. Please refer to our [Paper](https://arxiv.org/abs/2312.11825) or the individual models using the standalone script ([link](https://github.com/alibabasglab/MossFormer2/tree/main/MossFormer2_standalone)). 
+- Linux
+- NVIDIA GPU
+- Python `3.9` or `3.10`
+- PyTorch with CUDA already working before installing `mamba`
 
-We will provide performance comparisons of our released models with the publically available models in [ClearVoice](https://github.com/modelscope/ClearerVoice-Studio/tree/main/clearvoice) page.
+The local `mamba/` package in this repository declares `requires-python >= 3.9`, so `python=3.8` is not recommended for the `mamba2` path.
 
-## 2. Usage
+## 3. Environment setup
 
-### Step-by-Step Guide
+Create and activate a clean Conda environment:
 
-If you haven't created a Conda environment for ClearerVoice-Studio yet, follow steps 1 and 2. Otherwise, skip directly to step 3.
-
-1. **Clone the Repository**
-
-``` sh
-git clone https://github.com/modelscope/ClearerVoice-Studio.git
+```bash
+conda create -n mossformer-mamba2 python=3.9 -y
+conda activate mossformer-mamba2
 ```
 
-2. **Create Conda Environment**
+Install PyTorch with CUDA support first. Example for CUDA 12.1:
 
-``` sh
-cd ClearerVoice-Studio
-conda create -n ClearerVoice-Studio python=3.8
-conda activate ClearerVoice-Studio
-pip install -r requirements.txt
+```bash
+export REPO_ROOT=/path/to/mossformer
+cd "$REPO_ROOT"
+pip install --upgrade pip setuptools wheel
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-3. **Prepare Dataset**
+Install the MossFormer2 training dependencies:
 
-a. Use a pre-prepared toy [MiniLibriMix dataset](https://zenodo.org/records/3871592). It contains a train set of 800 mixtures and a validation set of 200 mixtures.
+```bash
+cd "$REPO_ROOT"
+pip install -r mossformer2/requirements-mamba2.txt
+```
 
-b. Create your own dataset
+Install the local `mamba/` package:
 
-- WSJ0-2Mix dataset preparation: We assume you have purchased [WSJ0 speech dataset](https://catalog.ldc.upenn.edu/LDC93S6A)
-  - Step 1: Download [WHAM! noise dataset](https://my-bucket-a8b4b49c25c811ee9a7e8bba05fa24c7.s3.amazonaws.com/wham_noise.zip). Go to [this page](http://wham.whisper.ai/) for more information.
-  - Step 2: Use the mixture generation scripts in [python format](https://github.com/mpariente/pywsj0-mix) or [matlab format](https://www.merl.com/research/highlights/deep-clustering/) to generate mixture datasets. Use the sampling rate either 8000Hz or 16000Hz.
-  - Step 3: Create scp files as formatted in `data/tr_wsj0_2mix_16k.scp` for train, validation, and test.
-  - Step 4: Replace the `tr_list` and `cv_list` paths for scp files in `config/train/MossFormer2_SS_16K.yaml`
- 
-- LibriMix dataset preparation: If you don't have WSJ0 dataset, we suggest you to download [LibriSpeech dataset](https://www.openslr.org/12) (only 'train-clean-360.tar.gz' is required) and use the following steps to create LibriMix dataset.
-  - Step 1. Download [WHAM! noise dataset](https://my-bucket-a8b4b49c25c811ee9a7e8bba05fa24c7.s3.amazonaws.com/wham_noise.zip). Go to [this page](http://wham.whisper.ai/) for more information.
-  - Step 2. Clone the [repo](https://github.com/JorisCos/LibriMix) and run the main script : [generate_librimix.sh](https://github.com/JorisCos/LibriMix/blob/master/generate_librimix.sh)
-    ```sh
-    git clone https://github.com/JorisCos/LibriMix
-    cd LibriMix 
-    ./generate_librimix.sh storage_dir
-    ```sh
-  - Step 3: Create scp files as formatted in `data/tr_wsj0_2mix_16k.scp` for train, validation, and test.
-  - Step 4: Replace the `tr_list` and `cv_list` paths for scp files in `config/train/MossFormer2_SS_16K.yaml`
+```bash
+cd "$REPO_ROOT"
+pip install -e ./mamba --no-build-isolation
+```
 
-4. **Start Training**
+If `pip install -e ./mamba --no-build-isolation` fails, fix the CUDA / PyTorch environment first before attempting training.
 
-``` sh
+## 4. Expected dataset format
+
+The trainer expects `.scp` files with one mixture per line.
+
+For 2-speaker separation:
+
+```text
+path/to/mix.wav path/to/s1.wav path/to/s2.wav
+```
+
+For more speakers:
+
+- keep the first column as the mixture path
+- append one clean target path per speaker
+
+The dataloader used by speech separation training reads:
+
+- first column as input mixture
+- remaining columns as target sources
+
+## 5. Libri2Mix 8k configs already added
+
+Two configs are ready for Libri2Mix 8k training from scratch:
+
+- `config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_small.yaml`
+- `config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_full.yaml`
+
+These configs currently assume:
+
+- `train = 30h`
+- `dev = 10h`
+- `test = 5h`
+- `8kHz`
+- `4s`
+
+You only need to edit:
+
+- `tr_list`
+- `cv_list`
+- optionally `tt_list`
+
+The current placeholders are:
+
+- `data/libri2mix_8k_train_30h.scp`
+- `data/libri2mix_8k_dev_10h.scp`
+- optional `data/libri2mix_8k_test_5h.scp`
+
+## 6. Important Mamba2 preflight checks
+
+When `recurrent_type="mamba2"`, the code now fails early if:
+
+- `use_cuda` is disabled
+- `torch.cuda.is_available()` is `False`
+- the local `mamba/` package is not importable
+- `recurrent_inner_channels * mamba_expand` is not divisible by `mamba_headdim`
+- `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state` is not a multiple of `8`
+
+This is intentional. It is better to fail early than to crash deep inside the CUDA / Triton path.
+
+## 7. Training configs
+
+### 7.1. Paper-like full
+
+Use:
+
+- `config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_full.yaml`
+
+This keeps the larger MossFormer2-style setup:
+
+- `encoder_embedding_dim: 512`
+- `mossformer_sequence_dim: 512`
+- `num_mossformer_layer: 24`
+- `recurrent_inner_channels: 256`
+- `mamba_d_state: 64`
+
+### 7.2. Smaller practical config
+
+Use:
+
+- `config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_small.yaml`
+
+This is the cheaper and more practical option for initial training runs:
+
+- `encoder_embedding_dim: 384`
+- `mossformer_sequence_dim: 384`
+- `num_mossformer_layer: 25`
+- `recurrent_inner_channels: 256`
+- `mamba_d_state: 64`
+
+## 8. Start training
+
+The updated `train.sh` supports both single-GPU and multi-GPU execution.
+
+### 8.1. Single GPU
+
+Small config:
+
+```bash
+cd "$REPO_ROOT/mossformer2"
+GPU_ID=0 \
+N_GPU=1 \
+CONFIG_PTH=config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_small.yaml \
+CHECKPOINT_DIR=checkpoints/MossFormer2_SS_8K_Libri2Mix_Mamba2_small \
 bash train.sh
 ```
 
-You may need to set the correct network in `train.sh` and choose either a fresh training or a finetune process using:
-```
-network=MossFormer2_SS_16K              #Train MossFormer2_SS_16K model
-train_from_last_checkpoint=1            #Set 1 only when resuming the same architecture and optimizer/training state
-init_checkpoint_path=None               #Path to your initial model for fine-tuning; keep it as 'None' for fresh training
-```
+Full config:
 
-If you switch between `fsmn` and `mamba2`, prefer:
-
-``` sh
-train_from_last_checkpoint=0
-init_checkpoint_path=/path/to/compatible_checkpoint.pt
+```bash
+cd "$REPO_ROOT/mossformer2"
+GPU_ID=0 \
+N_GPU=1 \
+CONFIG_PTH=config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_full.yaml \
+CHECKPOINT_DIR=checkpoints/MossFormer2_SS_8K_Libri2Mix_Mamba2_full \
+bash train.sh
 ```
 
-The current integration also performs an early preflight check for `recurrent_type=mamba2` and will stop before model construction if:
+### 8.2. Multi GPU
 
-- CUDA is not enabled or `torch.cuda.is_available()` is false
-- the local `mamba/` package or its CUDA/Triton dependencies are not importable
-- `recurrent_inner_channels * mamba_expand` is not divisible by `mamba_headdim`
-- `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state` is not a multiple of `8`
+Example with 2 GPUs:
+
+```bash
+cd "$REPO_ROOT/mossformer2"
+GPU_ID=0,1 \
+N_GPU=2 \
+CONFIG_PTH=config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_small.yaml \
+CHECKPOINT_DIR=checkpoints/MossFormer2_SS_8K_Libri2Mix_Mamba2_small_2gpu \
+bash train.sh
+```
+
+`train.sh` will automatically:
+
+- run `python train.py` when `N_GPU=1`
+- run `torchrun` when `N_GPU>1`
+
+## 9. Checkpoints and resume behavior
+
+Important rules:
+
+- use `train_from_last_checkpoint=1` only when resuming the same architecture
+- if you switch between `fsmn` and `mamba2`, prefer:
+
+```bash
+TRAIN_FROM_LAST_CHECKPOINT=0
+INIT_CHECKPOINT_PATH=/path/to/compatible_checkpoint.pt
+```
+
+This workspace already includes safer fallback logic if optimizer state is incompatible, but the recommended workflow is still:
+
+- same architecture: resume
+- different architecture: partial load + fresh training state
+
+## 10. Inference
+
+`inference.py` also includes the same `mamba2` preflight checks.
+
+The inference configs live in:
+
+- `config/inference/MossFormer2_SS_8K.yaml`
+- `config/inference/MossFormer2_SS_16K.yaml`
+
+Before inference with `mamba2`, make sure the inference config matches the training recurrent settings.
+
+## 11. Practical recommendations
+
+For first runs:
+
+1. Start with the small 8k Libri2Mix config.
+2. Keep `tt_list` disabled during training to save time.
+3. Confirm:
+   - loss is finite
+   - checkpoints are written correctly
+   - validation runs complete
+4. Only move to the full config after the small run is stable.
+
+## 12. Files to know
+
+- `train.py`: training entrypoint
+- `inference.py`: inference entrypoint
+- `train.sh`: practical launcher for 1 GPU or multi GPU
+- `requirements-mamba2.txt`: minimal Python dependencies for this workspace
+- `config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_small.yaml`
+- `config/train/MossFormer2_SS_8K_Libri2Mix_Mamba2_full.yaml`
+
+## 13. Common issues
+
+### Mamba2 import fails
+
+Check:
+
+- Python version is `>= 3.9`
+- PyTorch CUDA build is working
+- `pip install -e ./mamba --no-build-isolation` completed successfully
+
+### Config rejected by preflight
+
+Check:
+
+- `mamba_headdim`
+- `recurrent_inner_channels`
+- `mamba_expand`
+- `mamba_d_state`
+
+### Training is too slow
+
+Try:
+
+- the `small` config first
+- single-GPU sanity run before long training
+- smaller validation during tuning
+- no `tt_list` during the training loop
