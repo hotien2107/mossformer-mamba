@@ -1,5 +1,26 @@
 # Kế hoạch triển khai MossFormer2-Mamba2
 
+## 0. Trạng thái hiện tại sau triển khai
+
+Kế hoạch dưới đây là bản thiết kế ban đầu. Sau khi triển khai và rà lại code runtime, một số điểm đã được cập nhật thêm trong code thực tế để tăng độ an toàn vận hành:
+
+- `train.py` và `inference.py` hiện có preflight check riêng cho `recurrent_type="mamba2"`
+- preflight sẽ fail sớm nếu:
+  - `use_cuda` không bật
+  - `torch.cuda.is_available()` là `False`
+  - local `mamba/` hoặc dependency CUDA/Triton của `mamba_ssm` không import được
+  - `recurrent_inner_channels * mamba_expand` không chia hết cho `mamba_headdim`
+  - `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state` không phải bội số của `8`
+- `solver.py` đã được vá để:
+  - không xử lý `init_checkpoint_path=None` như một đường dẫn thật
+  - không ghi đè `best_val_loss` bằng validation loss tệ hơn
+  - fallback an toàn hơn khi resume checkpoint nhưng optimizer state không còn tương thích
+
+Ý nghĩa:
+
+- tài liệu này vẫn đúng về mặt kiến trúc
+- nhưng khi đọc các mục về dependency, checkpoint và training flow, cần hiểu rằng code hiện tại đã chặt hơn bản thiết kế ban đầu
+
 ## 1. Mục tiêu và phạm vi
 
 Mục tiêu của thay đổi này là thay nhánh recurrent của MossFormer2 từ Dilated FSMN sang Mamba-2, nhưng vẫn giữ nguyên phần attention branch, encoder/decoder, mask head, residual structure, normalization, và output interface của model. Biến thể mới có thể gọi là `MossFormer2-Mamba` hoặc `MossFormer2-SSD`.
@@ -184,6 +205,7 @@ Yêu cầu triển khai:
 
 - Nếu import Mamba lỗi, phải fail rõ ràng với thông báo dễ hiểu.
 - Không fallback âm thầm sang implementation giả.
+- Nên có preflight check ở entrypoint thay vì đợi model init hoặc runtime kernel mới báo lỗi.
 
 Quyết định cho v1:
 
@@ -203,6 +225,10 @@ Với cấu hình mặc định:
 
 thì cấu hình hợp lệ.
 
+Ràng buộc bổ sung đã được chốt trong code hiện tại:
+
+- `inner_channels * expand + 2 * d_state` phải là bội số của `8` để đi qua fused conv path ổn định hơn
+
 ### 5.3. Rủi ro checkpoint
 
 Checkpoint baseline FSMN sẽ không load hoàn toàn vào recurrent branch mới.
@@ -212,6 +238,12 @@ Yêu cầu xử lý:
 - Cho phép partial load
 - Log rõ `missing keys` / `unexpected keys`
 - Không làm hỏng khả năng finetune từ phần còn lại của model
+- Nếu optimizer state không còn tương thích, không nên crash toàn bộ startup.
+
+Khuyến nghị workflow hiện tại:
+
+- nếu giữ nguyên kiến trúc và muốn resume đầy đủ, dùng `train_from_last_checkpoint=1`
+- nếu đổi giữa `fsmn` và `mamba2`, ưu tiên `train_from_last_checkpoint=0` và dùng `init_checkpoint_path`
 
 ### 5.4. Rủi ro shape và stability
 
@@ -227,6 +259,7 @@ Khuyến nghị:
 
 - Giữ parameter ở fp32 khi train AMP
 - Không tự ý đổi initialization của Mamba
+- Không coi thiếu AMP là bug chức năng, nhưng vẫn nên xem đó là hướng tối ưu hiệu năng riêng.
 
 ## 6. Test plan bắt buộc
 
@@ -321,4 +354,3 @@ Public interface của model không đổi:
 - V1 không thay đổi train loop, loss, dataloader, encoder, decoder, hoặc attention branch
 - V1 không cố hỗ trợ fallback CPU cho Mamba-2 nếu dependency không đáp ứng
 - V1 giữ baseline FSMN làm mặc định để tránh phá workflow hiện tại
-

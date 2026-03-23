@@ -6,6 +6,23 @@ Tài liệu này mô tả các thay đổi đã thực hiện trong code để t
 - Đoạn code mới
 - Ý nghĩa của thay đổi
 
+## 0. Cập nhật bổ sung sau tích hợp ban đầu
+
+Sau khi rà lại đường chạy training/inference thực tế, code đã được cập nhật thêm một số điểm ổn định vận hành:
+
+- thêm preflight check trong `train.py` và `inference.py` cho `recurrent_type="mamba2"`
+- fail sớm nếu môi trường không có CUDA khả dụng hoặc `mamba_ssm` import không thành công
+- fail sớm nếu cấu hình `mamba_headdim` hoặc fused conv width không hợp lệ
+- sửa logic `best_val_loss` trong `solver.py` để early stopping và halving bám theo best thật
+- làm an toàn hơn luồng resume/fallback checkpoint khi đổi kiến trúc giữa `fsmn` và `mamba2`
+- sửa điều kiện `init_checkpoint_path` để training mới không vô tình xử lý `None` như một đường dẫn checkpoint
+
+Ý nghĩa thực tế:
+
+- lỗi được báo gần điểm cấu hình hơn, dễ hiểu hơn
+- giảm nguy cơ crash khi resume checkpoint không tương thích
+- hành vi training hiện khớp hơn với kỳ vọng khi fine-tune từ baseline FSMN sang Mamba-2
+
 ## 1. `mossformer2/models/mossformer2/mossformer2_block.py`
 
 ### 1.1. Bổ sung lazy import cho Mamba-2
@@ -462,4 +479,3 @@ Lưu ý:
 
 - chưa chạy forward test thật vì môi trường hiện tại không có sẵn `torch` để khởi tạo model
 - phần import Mamba được thiết kế để báo lỗi rõ khi bạn thực sự bật `recurrent_type=mamba2` mà dependency chưa sẵn sàng
-

@@ -77,7 +77,20 @@ bash train.sh
 You may need to set the correct network in `train.sh` and choose either a fresh training or a finetune process using:
 ```
 network=MossFormer2_SS_16K              #Train MossFormer2_SS_16K model
-train_from_last_checkpoint=1            #Set 1 to start training from the last checkpoint if exists, 
-init_checkpoint_path=./                 #Path to your initial model if starting fine-tuning; otherwise, set it to 'None'
+train_from_last_checkpoint=1            #Set 1 only when resuming the same architecture and optimizer/training state
+init_checkpoint_path=None               #Path to your initial model for fine-tuning; keep it as 'None' for fresh training
 ```
 
+If you switch between `fsmn` and `mamba2`, prefer:
+
+``` sh
+train_from_last_checkpoint=0
+init_checkpoint_path=/path/to/compatible_checkpoint.pt
+```
+
+The current integration also performs an early preflight check for `recurrent_type=mamba2` and will stop before model construction if:
+
+- CUDA is not enabled or `torch.cuda.is_available()` is false
+- the local `mamba/` package or its CUDA/Triton dependencies are not importable
+- `recurrent_inner_channels * mamba_expand` is not divisible by `mamba_headdim`
+- `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state` is not a multiple of `8`

@@ -34,6 +34,23 @@ def _load_mamba2():
         ) from exc
     return mamba2_cls
 
+
+def _validate_mamba2_config(hidden_size, d_state, expand, headdim):
+    """Fail early with actionable messages for invalid Mamba2 settings."""
+    expanded_width = hidden_size * expand
+    if expanded_width % headdim != 0:
+        raise ValueError(
+            "Invalid Mamba2 config: recurrent_inner_channels * mamba_expand must be divisible "
+            f"by mamba_headdim, got {hidden_size} * {expand} and headdim={headdim}."
+        )
+
+    conv_channels = expanded_width + 2 * d_state
+    if conv_channels % 8 != 0:
+        raise ValueError(
+            "Invalid Mamba2 config: expanded recurrent width + 2 * mamba_d_state must be a "
+            f"multiple of 8 for the fused conv path, got {expanded_width} + 2 * {d_state} = {conv_channels}."
+        )
+
 def identity(t, *args, **kwargs):
     return t
 
@@ -422,6 +439,7 @@ class Gated_Mamba2(nn.Module):
         headdim=64,
     ):
         super().__init__()
+        _validate_mamba2_config(hidden_size, d_state, expand, headdim)
         self.to_u = FFConvM(
             dim_in=in_channels,
             dim_out=hidden_size,

@@ -38,6 +38,7 @@ class Solver(object):
         self.step = 0
         self.best_val_loss = float("inf")
         self.val_no_impv = 0
+        has_init_checkpoint = self.args.init_checkpoint_path not in (None, 'None', '')
 
         if self.args.train_from_last_checkpoint:
             flag = self._load_model()
@@ -54,7 +55,7 @@ class Solver(object):
                     if flag ==1:
                         self._load_pretrained_model(checkpoint_path)
      
-        elif self.args.init_checkpoint_path != 'None':
+        elif has_init_checkpoint:
             self._load_pretrained_model(self.args.init_checkpoint_path)
         else:
             if self.print: print('Start new training')
@@ -135,10 +136,18 @@ class Solver(object):
                     g['lr'] = self.args.learning_rate
             # load the training states
             elif load_training_stat:
-                self.optimizer.load_state_dict(checkpoint['optimizer'])
-                self.epoch=checkpoint['epoch']
-                self.step = checkpoint['step']
-                if self.print: print("Resume training from epoch: {}".format(self.epoch))
+                try:
+                    self.optimizer.load_state_dict(checkpoint['optimizer'])
+                    self.epoch=checkpoint['epoch']
+                    self.step = checkpoint['step']
+                    if self.print: print("Resume training from epoch: {}".format(self.epoch))
+                except Exception as e:
+                    self.epoch = 0
+                    self.step = 0
+                    for g in self.optimizer.param_groups:
+                        g['lr'] = self.args.finetune_learning_rate
+                    if self.print:
+                        print(f'Optimizer state is incompatible with the current model; restarting training stats: {e}')
 
             else:
                 for g in self.optimizer.param_groups:
@@ -192,7 +201,6 @@ class Solver(object):
             # Check whether to early stop and to reduce learning rate
             find_best_model = False
             if val_loss >= self.best_val_loss:
-                self.best_val_loss = val_loss
                 self.val_no_impv += 1
                 if self.val_no_impv == 5:
                     self.halving = True

@@ -14,8 +14,47 @@ from networks import network_wrapper
 
 warnings.filterwarnings("ignore")
 
+
+def _preflight_mamba2(args):
+    if args.recurrent_type != 'mamba2':
+        return
+
+    if not args.use_cuda:
+        raise RuntimeError("Mamba2 inference requires CUDA in this integration. Set --use-cuda 1.")
+    if not torch.cuda.is_available():
+        raise RuntimeError("Mamba2 inference requested CUDA, but torch.cuda.is_available() is False.")
+
+    expanded_width = args.recurrent_inner_channels * args.mamba_expand
+    if expanded_width % args.mamba_headdim != 0:
+        raise ValueError(
+            "Invalid Mamba2 config: recurrent_inner_channels * mamba_expand must be divisible by "
+            f"mamba_headdim, got {args.recurrent_inner_channels} * {args.mamba_expand} and "
+            f"mamba_headdim={args.mamba_headdim}."
+        )
+
+    conv_channels = expanded_width + 2 * args.mamba_d_state
+    if conv_channels % 8 != 0:
+        raise ValueError(
+            "Invalid Mamba2 config: expanded recurrent width + 2 * mamba_d_state must be a multiple "
+            f"of 8 for the fused conv path, got {expanded_width} + 2 * {args.mamba_d_state} = {conv_channels}."
+        )
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    local_mamba_root = os.path.join(project_root, 'mamba')
+    if os.path.isdir(local_mamba_root) and local_mamba_root not in sys.path:
+        sys.path.insert(0, local_mamba_root)
+
+    try:
+        from mamba_ssm import Mamba2  # noqa: F401
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed Mamba2 preflight. Ensure the local `mamba/` package and its CUDA/Triton dependencies "
+            "are installed and importable before inference with recurrent_type='mamba2'."
+        ) from exc
+
 def inference(args):
     device = torch.device('cuda') if args.use_cuda==1 else torch.device('cpu')
+    _preflight_mamba2(args)
     print(device)
     print('creating model...')
     model = network_wrapper(args).ss_network

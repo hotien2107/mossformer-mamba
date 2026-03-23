@@ -877,6 +877,28 @@ Sau khi chạy ổn, mới thử:
 - `expand=1.5` hoặc `2`
 - thay `inner_channels`
 
+### 15.1. Ghi chú đồng bộ với code hiện tại
+
+Sau khi triển khai và rà soát lại đường chạy thật, code hiện tại đã có thêm một số hardening ngoài phạm vi thiết kế ban đầu:
+
+- `train.py` và `inference.py` có preflight check cho `recurrent_type="mamba2"`
+- preflight sẽ fail sớm nếu:
+  - `use_cuda` chưa bật
+  - `torch.cuda.is_available()` là `False`
+  - local `mamba/` hoặc `mamba_ssm` không import được
+  - `recurrent_inner_channels * mamba_expand` không chia hết cho `mamba_headdim`
+  - `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state` không phải bội số của `8`
+- `solver.py` đã được vá để:
+  - không xem `init_checkpoint_path=None` là đường dẫn hợp lệ
+  - không ghi đè `best_val_loss` bằng validation loss tệ hơn
+  - fallback an toàn hơn khi optimizer state không còn khớp trong luồng resume checkpoint
+
+Ý nghĩa thực tế:
+
+- cấu hình `mamba2` hiện fail sớm và rõ ràng hơn
+- workflow đổi từ `fsmn` sang `mamba2` an toàn hơn
+- các kết quả train mới phản ánh đúng hơn chất lượng mô hình thay vì bị nhiễu bởi bug của trainer
+
 ---
 
 ## 16. Đề xuất cấu trúc file sau khi sửa

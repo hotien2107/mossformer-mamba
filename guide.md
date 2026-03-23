@@ -225,8 +225,16 @@ Nếu muốn dùng `recurrent_type=mamba2`, bạn cần môi trường có Mamba
 
 Lưu ý:
 
-- nếu dependency chưa sẵn sàng, code sẽ báo lỗi rõ khi khởi tạo model với `recurrent_type=mamba2`
+- từ bản cập nhật mới, `train.py` và `inference.py` có preflight check riêng cho `mamba2`
+- nếu dependency chưa sẵn sàng, code sẽ fail sớm với lỗi rõ ràng trước khi đi sâu vào model init hoặc kernel runtime
 - nếu bạn vẫn dùng `recurrent_type=fsmn`, baseline vẫn không phụ thuộc vào Mamba-2
+
+Ngoài dependency, preflight hiện còn kiểm tra:
+
+- `use_cuda=1`
+- `torch.cuda.is_available() == True`
+- `recurrent_inner_channels * mamba_expand` phải chia hết cho `mamba_headdim`
+- `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state` phải là bội số của `8`
 
 ## 6. Cách chạy training
 
@@ -286,6 +294,8 @@ python3 train.py \
   --mamba-headdim 64
 ```
 
+Nếu môi trường hoặc config không hợp lệ, lệnh sẽ dừng ngay ở preflight thay vì báo lỗi sâu trong `mamba_ssm`.
+
 ## 7. Cách fine-tuning
 
 Fine-tuning có hai tình huống chính.
@@ -302,6 +312,7 @@ Khi đó:
 1. giữ nguyên recurrent config
 2. đặt `init_checkpoint_path` đến checkpoint muốn nạp
 3. dùng `finetune_learning_rate`
+4. chỉ dùng `train_from_last_checkpoint=1` khi checkpoint trước đó đúng cùng kiến trúc và bạn thực sự muốn resume cả optimizer/training state
 
 Ví dụ:
 
@@ -321,12 +332,14 @@ Cách làm:
 
 1. đổi `recurrent_type` sang `mamba2`
 2. đặt `init_checkpoint_path` tới checkpoint baseline
-3. chấp nhận việc recurrent branch mới không load đầy đủ
+3. để `train_from_last_checkpoint=0`
+4. chấp nhận việc recurrent branch mới không load đầy đủ
 
 Khuyến nghị:
 
 - theo dõi log `missing keys`
 - dùng `finetune_learning_rate` nhỏ hơn training from scratch
+- không resume optimizer state từ checkpoint `fsmn` cũ
 
 Ví dụ:
 
@@ -375,6 +388,7 @@ python3 inference.py --config config/inference/MossFormer2_SS_16K.yaml
 ```
 
 Nếu config inference không khớp recurrent branch của checkpoint, model có thể không load đúng.
+Từ bản cập nhật mới, `inference.py` cũng có preflight cho `mamba2`, nên các lỗi CUDA/dependency/config sai sẽ được báo sớm hơn.
 
 ## 9. Quy trình khuyến nghị để thử nghiệm
 
@@ -397,6 +411,7 @@ Cách xử lý:
 
 - kiểm tra `torch`
 - kiểm tra `mamba-ssm`
+- kiểm tra CUDA/Triton
 - chỉ bật `recurrent_type=mamba2` khi dependency đã sẵn sàng
 
 ### 10.2. Lỗi cấu hình `headdim`
@@ -404,11 +419,13 @@ Cách xử lý:
 Nguyên nhân:
 
 - `mamba_headdim` không chia hết expanded width
+- hoặc fused conv width không phải bội số của `8`
 
 Cách xử lý:
 
 - dùng preset chuẩn `64`
 - nếu đổi `recurrent_inner_channels` hoặc `mamba_expand`, kiểm tra lại tính chia hết
+- đồng thời kiểm tra `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state`
 
 ### 10.3. Load checkpoint bị thiếu key
 
@@ -421,4 +438,17 @@ Cách xử lý:
 - đây là điều bình thường khi recurrent branch khác loại
 - đảm bảo các phần còn lại load được
 - ưu tiên fine-tune thay vì kỳ vọng restore hoàn toàn
+- nếu đổi kiến trúc, ưu tiên `init_checkpoint_path` hơn `train_from_last_checkpoint`
 
+### 10.4. Resume training bị lỗi khi đổi từ FSMN sang Mamba-2
+
+Nguyên nhân:
+
+- checkpoint cũ chứa optimizer state của kiến trúc khác
+- model mới chỉ load được một phần weights tương thích
+
+Cách xử lý:
+
+- nếu đổi kiến trúc, đặt `train_from_last_checkpoint=0`
+- dùng `init_checkpoint_path` để nạp weights tương thích
+- code hiện tại đã fallback an toàn hơn nếu optimizer state không khớp, nhưng workflow khuyến nghị vẫn là fine-tune thay vì resume toàn bộ trạng thái train
