@@ -9,6 +9,10 @@ import sys
 sys.path.append('../../')
 
 
+def _is_missing_path(value):
+    return value in (None, 'None', '', 'null', 'Null')
+
+
 def _preflight_mamba2(args):
     if args.recurrent_type != 'mamba2':
         return
@@ -55,6 +59,10 @@ def main(args):
     torch.manual_seed(args.seed)
     device = torch.device('cuda') if args.use_cuda else torch.device('cpu')
     args.device = device
+    if _is_missing_path(args.tt_list):
+        args.tt_list = None
+    if _is_missing_path(args.init_checkpoint_path):
+        args.init_checkpoint_path = None
     _preflight_mamba2(args)
 
     if args.distributed:
@@ -107,6 +115,8 @@ if __name__ == '__main__':
     # experiment setting
     parser.add_argument('--mode', type=str, default='train', help='run train or inference')
     parser.add_argument('--use-cuda', dest='use_cuda', default=1, type=int, help='use cuda')
+    parser.add_argument('--use-amp', dest='use_amp', default=0, type=int,
+                        help='use torch autocast + GradScaler for mixed precision training')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/MossFormer2_SS_16K',help='the checkpoint dir')
     parser.add_argument('--network', type=str, default='frcrn', help='the model network types to be loaded for speech enhancment: MossFormer2_SS_16K, MossFormer2_SS_8K')
     parser.add_argument('--train_from_last_checkpoint', type=int, help='0 or 1, whether to train from a pre-trained checkpoint, includes model weight, optimizer settings')
@@ -171,5 +181,3 @@ if __name__ == '__main__':
         args.world_size = int(os.environ['WORLD_SIZE'])
     assert torch.backends.cudnn.enabled, "cudnn needs to be enabled"
     main(args)
-
-

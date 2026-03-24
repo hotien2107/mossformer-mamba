@@ -1,0 +1,41 @@
+#!/bin/bash
+mode: 'train'
+use_cuda: 1
+use_amp: 1
+
+sampling_rate: 8000
+network: "MossFormer2_SS_8K"
+
+num_spks: 2
+encoder_kernel_size: 16
+encoder_embedding_dim: 256
+mossformer_sequence_dim: 256
+num_mossformer_layer: 8
+recurrent_type: "mamba2"
+recurrent_inner_channels: 128
+mamba_d_state: 32
+mamba_d_conv: 4
+mamba_expand: 2
+mamba_headdim: 32
+
+load_type: 'one_input_multi_outputs'
+tr_list: 'data/libri2mix_8k_train_30h.scp'
+cv_list: 'data/libri2mix_8k_dev_10h.scp'
+# tt_list: 'data/libri2mix_8k_test_5h.scp'
+
+init_learning_rate: 0.00015
+finetune_learning_rate: 0.00005
+
+loss_threshold: -9999.0
+max_epoch: 40
+
+weight_decay: 0.00001
+clip_grad_norm: 10.
+
+seed: 777
+
+num_workers: 0
+batch_size: 1
+accu_grad: 1
+effec_batch_size: 4
+max_length: 4

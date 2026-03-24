@@ -6,6 +6,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from losses.loss import loss_mossformer2_ss
 
+
+def _has_value(value):
+    return value not in (None, 'None', '', 'null', 'Null')
+
+
 class Solver(object):
     def __init__(self, args, model, optimizer, train_data, validation_data, test_data):
         self.train_data = train_data
@@ -21,6 +26,8 @@ class Solver(object):
 
         self.model = model
         self.optimizer=optimizer
+        self.use_amp = bool(getattr(self.args, 'use_amp', 0)) and self.device.type == 'cuda'
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
         if self.args.distributed:
             self.model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.model)
             self.model = DDP(self.model, device_ids=[self.args.local_rank],find_unused_parameters=True)
@@ -38,7 +45,7 @@ class Solver(object):
         self.step = 0
         self.best_val_loss = float("inf")
         self.val_no_impv = 0
-        has_init_checkpoint = self.args.init_checkpoint_path not in (None, 'None', '')
+        has_init_checkpoint = _has_value(self.args.init_checkpoint_path)
 
         if self.args.train_from_last_checkpoint:
             flag = self._load_model()
@@ -196,7 +203,7 @@ class Solver(object):
                 if self.args.distributed: val_loss = self._reduce_tensor(val_loss)
             if self.print: print(f'Valid Summary | End of Epoch {epoch} | Time {time.time() - start:2.3f}s | Valid Loss {val_loss:2.4f}', flush=True)
           
-            if self.args.tt_list is not None:
+            if _has_value(self.args.tt_list):
                 # Test
                 self.model.eval()
                 start = time.time()
@@ -235,7 +242,7 @@ class Solver(object):
                 # Tensorboard logging
                 self.writer.add_scalar('Train_loss', tr_loss, epoch)
                 self.writer.add_scalar('Validation_loss', val_loss, epoch)
-                if self.args.tt_list is not None:
+                if _has_value(self.args.tt_list):
                     self.writer.add_scalar('Test_loss', test_loss, epoch)
 
             # Save model
@@ -263,8 +270,9 @@ class Solver(object):
             inputs = inputs.to(self.device)
             labels = labels.to(self.device)
 
-            Out_List = self.model(inputs)
-            loss = loss_mossformer2_ss(self.args, inputs, labels, Out_List, self.device)
+            with torch.amp.autocast('cuda', enabled=self.use_amp):
+                Out_List = self.model(inputs)
+                loss = loss_mossformer2_ss(self.args, inputs, labels, Out_List, self.device)
             if self.print and i == 0:
                 print(
                     f'First {state} batch finished forward/loss | '
@@ -280,11 +288,20 @@ class Solver(object):
                         loss_bw = loss_bw.mean()
                         if loss_bw < 999999:
                             loss_scaled = loss_bw/(self.args.effec_batch_size / self.args.batch_size)
-                            loss_scaled.backward()
-                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                            if self.use_amp:
+                                self.scaler.scale(loss_scaled).backward()
+                            else:
+                                loss_scaled.backward()
           
                     if self.accu_count == (self.args.effec_batch_size / self.args.batch_size):
-                        self.optimizer.step()
+                        if self.use_amp:
+                            self.scaler.unscale_(self.optimizer)
+                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                            self.scaler.step(self.optimizer)
+                            self.scaler.update()
+                        else:
+                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                            self.optimizer.step()
                         self.optimizer.zero_grad()
                         self.accu_count = 0
 
@@ -293,9 +310,16 @@ class Solver(object):
                     if loss_bw.nelement() > 0:
                         loss_bw = loss_bw.mean()
                         if loss_bw < 999999:
-                            loss_bw.backward()
-                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
-                            self.optimizer.step()
+                            if self.use_amp:
+                                self.scaler.scale(loss_bw).backward()
+                                self.scaler.unscale_(self.optimizer)
+                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                                self.scaler.step(self.optimizer)
+                                self.scaler.update()
+                            else:
+                                loss_bw.backward()
+                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip_grad_norm)
+                                self.optimizer.step()
                             self.optimizer.zero_grad()
 
                 self.step += 1
