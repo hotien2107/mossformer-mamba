@@ -21,6 +21,7 @@ mkdir -p "${checkpoint_dir}"
 cp "${config_pth}" "${checkpoint_dir}/config.yaml"
 
 export PYTHONWARNINGS="ignore"
+export PYTHONUNBUFFERED="1"
 
 common_args="--config ${config_pth} \
 --checkpoint_dir ${checkpoint_dir} \
@@ -31,7 +32,7 @@ common_args="--config ${config_pth} \
 
 if [ "${n_gpu}" -le 1 ]; then
   CUDA_VISIBLE_DEVICES="${gpu_id}" \
-  python -W ignore train.py ${common_args}
+  python -u -W ignore train.py ${common_args}
 else
   CUDA_VISIBLE_DEVICES="${gpu_id}" \
   torchrun \

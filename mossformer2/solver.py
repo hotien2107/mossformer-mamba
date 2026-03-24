@@ -176,10 +176,17 @@ class Solver(object):
             if self.args.distributed: self.args.train_sampler.set_epoch(epoch)
             # Train
             self.model.train()
+            if self.print:
+                print(
+                    f'Start Epoch {epoch}/{self.args.max_epoch} | '
+                    f'train_batches {len(self.train_data)} | '
+                    f'val_batches {len(self.validation_data)}',
+                    flush=True,
+                )
             start = time.time()            
             tr_loss = self._run_one_epoch(data_loader = self.train_data)
             if self.args.distributed: tr_loss = self._reduce_tensor(tr_loss)
-            if self.print: print(f'Train Summary | End of Epoch {epoch} | Time {time.time() - start:2.3f}s | Train Loss {tr_loss:2.4f}')
+            if self.print: print(f'Train Summary | End of Epoch {epoch} | Time {time.time() - start:2.3f}s | Train Loss {tr_loss:2.4f}', flush=True)
 
             # Validation
             self.model.eval()
@@ -187,7 +194,7 @@ class Solver(object):
             with torch.no_grad():
                 val_loss = self._run_one_epoch(data_loader = self.validation_data, state='val')
                 if self.args.distributed: val_loss = self._reduce_tensor(val_loss)
-            if self.print: print(f'Valid Summary | End of Epoch {epoch} | Time {time.time() - start:2.3f}s | Valid Loss {val_loss:2.4f}')
+            if self.print: print(f'Valid Summary | End of Epoch {epoch} | Time {time.time() - start:2.3f}s | Valid Loss {val_loss:2.4f}', flush=True)
           
             if self.args.tt_list is not None:
                 # Test
@@ -196,7 +203,7 @@ class Solver(object):
                 with torch.no_grad():
                     test_loss = self._run_one_epoch(data_loader = self.test_data, state='test')
                     if self.args.distributed: test_loss = self._reduce_tensor(test_loss)
-                if self.print: print(f'Test Summary | End of Epoch {epoch} | Time {time.time() - start:2.3f}s | Test Loss {test_loss:2.4f}')
+                if self.print: print(f'Test Summary | End of Epoch {epoch} | Time {time.time() - start:2.3f}s | Test Loss {test_loss:2.4f}', flush=True)
 
             # Check whether to early stop and to reduce learning rate
             find_best_model = False
@@ -205,7 +212,7 @@ class Solver(object):
                 if self.val_no_impv == 5:
                     self.halving = True
                 elif self.val_no_impv >= 10:
-                    if self.print: print("No imporvement for 10 epochs, early stopping.")
+                    if self.print: print("No imporvement for 10 epochs, early stopping.", flush=True)
                     break
             else:
                 self.val_no_impv = 0
@@ -216,12 +223,12 @@ class Solver(object):
             if self.halving:
                 self.halving = False
                 self._load_model(mode='last_best_checkpoint')
-                if self.print: print('reload from last best checkpoint')
+                if self.print: print('reload from last best checkpoint', flush=True)
 
                 optim_state = self.optimizer.state_dict()
                 optim_state['param_groups'][0]['lr'] *= 0.5
                 self.optimizer.load_state_dict(optim_state)
-                if self.print: print('Learning rate adjusted to: {lr:.6f}'.format(lr=optim_state['param_groups'][0]['lr']))
+                if self.print: print('Learning rate adjusted to: {lr:.6f}'.format(lr=optim_state['param_groups'][0]['lr']), flush=True)
                 
 
             if self.print:
@@ -247,11 +254,23 @@ class Solver(object):
         self.optimizer.zero_grad()
         stime = time.time()
         for i, (inputs, labels) in enumerate(data_loader):
+            if self.print and i == 0:
+                print(
+                    f'First {state} batch fetched | '
+                    f'inputs {tuple(inputs.shape)} | labels {tuple(labels.shape)}',
+                    flush=True,
+                )
             inputs = inputs.to(self.device)
             labels = labels.to(self.device)
 
             Out_List = self.model(inputs)
             loss = loss_mossformer2_ss(self.args, inputs, labels, Out_List, self.device)
+            if self.print and i == 0:
+                print(
+                    f'First {state} batch finished forward/loss | '
+                    f'loss_shape {tuple(loss.shape)}',
+                    flush=True,
+                )
 
             if state=='train':
                 if self.args.accu_grad:
@@ -291,7 +310,7 @@ class Solver(object):
                       .format(self.epoch, self.args.max_epoch,
                           i+1, num_batch, speed_avg, self.optimizer.param_groups[0]["lr"],
                           mix_loss_print_avg,
-                        ))
+                        ), flush=True)
                     mix_loss_print = 0.0
                 if (i + 1) % self.args.checkpoint_save_freq == 0:
                     self.save_checkpoint()
