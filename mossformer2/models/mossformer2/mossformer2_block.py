@@ -4,8 +4,6 @@ This source code is rewritten by Shengkui Zhao based on https://github.com/lucid
 """
 
 import math
-import os
-import sys
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
@@ -21,16 +19,13 @@ from models.mossformer2.layer_norm import CLayerNorm, GLayerNorm, GlobLayerNorm,
 
 def _load_mamba2():
     """Lazy import so baseline FSMN still works without Mamba dependencies."""
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    local_mamba_root = os.path.join(project_root, "mamba")
-    if os.path.isdir(local_mamba_root) and local_mamba_root not in sys.path:
-        sys.path.insert(0, local_mamba_root)
     try:
         from mamba_ssm import Mamba2 as mamba2_cls
     except Exception as exc:
         raise ImportError(
-            "Failed to import Mamba2. Install the `mamba-ssm` dependencies or make the local "
-            "`mamba/` repository importable before using recurrent_type='mamba2'."
+            "Failed to import Mamba2 from pip package `mamba-ssm`. "
+            "Install `mamba-ssm`, `causal-conv1d`, `ninja`, and `packaging` before "
+            "using recurrent_type='mamba2'."
         ) from exc
     return mamba2_cls
 

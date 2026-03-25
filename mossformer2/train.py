@@ -37,17 +37,12 @@ def _preflight_mamba2(args):
             f"of 8 for the fused conv path, got {expanded_width} + 2 * {args.mamba_d_state} = {conv_channels}."
         )
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    local_mamba_root = os.path.join(project_root, 'mamba')
-    if os.path.isdir(local_mamba_root) and local_mamba_root not in sys.path:
-        sys.path.insert(0, local_mamba_root)
-
     try:
         from mamba_ssm import Mamba2  # noqa: F401
     except Exception as exc:
         raise RuntimeError(
-            "Failed Mamba2 preflight. Ensure the local `mamba/` package and its CUDA/Triton dependencies "
-            "are installed and importable before training with recurrent_type='mamba2'."
+            "Failed Mamba2 preflight. Install pip packages `mamba-ssm`, `causal-conv1d`, "
+            "`ninja`, and `packaging` before training with recurrent_type='mamba2'."
         ) from exc
 
 def main(args):
