@@ -3,7 +3,7 @@
 This folder contains the training and inference code for MossFormer2 speech separation in the current workspace. The codebase now supports two recurrent variants inside the separator:
 
 - `fsmn`: original baseline branch
-- `mamba2`: new recurrent branch based on the local `mamba/` package
+- `mamba2`: new recurrent branch based on pip package `mamba-ssm`
 
 The default model families are:
 
@@ -27,9 +27,9 @@ Use:
 - Linux
 - NVIDIA GPU
 - Python `3.9` or `3.10`
-- PyTorch with CUDA already working before installing `mamba`
+- PyTorch with CUDA already working before installing `mamba-ssm`
 
-The local `mamba/` package in this repository declares `requires-python >= 3.9`, so `python=3.8` is not recommended for the `mamba2` path.
+`mamba-ssm` requires a modern Python/PyTorch/CUDA stack, so `python=3.9` or newer is recommended for the `mamba2` path.
 
 ## 3. Environment setup
 
@@ -56,14 +56,14 @@ cd "$REPO_ROOT"
 pip install -r mossformer2/requirements-mamba2.txt
 ```
 
-Install the local `mamba/` package:
+`mamba2` dependencies are installed from pip via `requirements-mamba2.txt` and include:
 
-```bash
-cd "$REPO_ROOT"
-pip install -e ./mamba --no-build-isolation
-```
+- `mamba-ssm`
+- `causal-conv1d`
+- `ninja`
+- `packaging`
 
-If `pip install -e ./mamba --no-build-isolation` fails, fix the CUDA / PyTorch environment first before attempting training.
+If installation fails, fix the CUDA / PyTorch environment first before attempting training.
 
 ## 4. Expected dataset format
 
@@ -118,7 +118,7 @@ When `recurrent_type="mamba2"`, the code now fails early if:
 
 - `use_cuda` is disabled
 - `torch.cuda.is_available()` is `False`
-- the local `mamba/` package is not importable
+- `mamba-ssm` is not importable from your active environment
 - `recurrent_inner_channels * mamba_expand` is not divisible by `mamba_headdim`
 - `recurrent_inner_channels * mamba_expand + 2 * mamba_d_state` is not a multiple of `8`
 
@@ -257,7 +257,7 @@ Check:
 
 - Python version is `>= 3.9`
 - PyTorch CUDA build is working
-- `pip install -e ./mamba --no-build-isolation` completed successfully
+- `pip install -r mossformer2/requirements-mamba2.txt` completed successfully
 
 ### Config rejected by preflight
 
@@ -276,3 +276,12 @@ Try:
 - single-GPU sanity run before long training
 - smaller validation during tuning
 - no `tt_list` during the training loop
+
+
+## 14. Kaggle quick install cell
+
+If you run this project in a Kaggle notebook, install dependencies with:
+
+```bash
+!pip install -r mossformer2/requirements-mamba2.txt
+```

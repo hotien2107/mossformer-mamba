@@ -10,3 +10,7 @@ rotary-embedding-torch
 tensorboard
 pesq
 pystoi
+mamba-ssm
+causal-conv1d
+ninja
+packaging
